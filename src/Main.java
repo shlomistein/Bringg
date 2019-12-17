@@ -1,10 +1,13 @@
+import java.util.ArrayList;
+import java.util.List;
 import java.util.Vector;
+import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
-import java.util.concurrent.TimeUnit;
+import java.util.stream.Collectors;
 
 public class Main {
-	static int NUM_OF_THREADS = 3;
+	static int NUM_OF_THREADS = 7;
 
 	public static void main(String[] args) {
 		Vector<Point> pointList = new Vector<Point>();
@@ -27,7 +30,8 @@ public class Main {
 
 	private static Vector<Vector<Double>> calcDistanceMatrix(Vector<Point> points, int numOfThreads) {
 		int sizeOfTable = points.size();
-
+		
+        // Create and allocate a matrix 
 		Vector<Vector<Double>> matrix = new Vector<Vector<Double>>();
 		matrix.setSize(sizeOfTable);
 		for (int i = 0; i < sizeOfTable; i++) {
@@ -35,23 +39,26 @@ public class Main {
 			innerVec.setSize(sizeOfTable);
 			matrix.set(i, innerVec);
 		}
-		
+        
+		// Run each calculation in a task asynchronously, using n-threads. 
 		ExecutorService executor = Executors.newFixedThreadPool(numOfThreads);
+		List<CompletableFuture<DistanceCalc>> futureList = new ArrayList<CompletableFuture<DistanceCalc>>();
         for (int i = 0; i < sizeOfTable; i++) {
         	for (int j = i; j < sizeOfTable; j++) {
-            Runnable worker = new DistanceCalculatorRunnable(matrix, points, i, j);
-            executor.execute(worker);
-          }
+        		final Integer innerI = i;
+        		final Integer innerJ = j;
+        		futureList.add(CompletableFuture.supplyAsync(
+        				() -> new DistanceCalc(points.get(innerI), points.get(innerJ), innerI, innerJ).calc(), executor));
+        	}
         }
-        executor.shutdown();
-        try {
-			executor.awaitTermination(4, TimeUnit.MINUTES);
-		} catch (InterruptedException e) {
-			e.printStackTrace();
-			return null;
-		}
-        
+
+        // Join - wait for all tasks to complete, and fill each result into the matrix.
+		futureList.stream().map(CompletableFuture::join).forEach(
+				res -> {matrix.get(res.i).set(res.j, res.distance);
+				matrix.get(res.j).set(res.i, res.distance);});
+				
+		executor.shutdown();
+		
 		return matrix;
 	}
-
 }
